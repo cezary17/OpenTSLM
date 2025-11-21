@@ -65,7 +65,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
             trust_remote_code=True,
             cache_dir=None,
             device_map={"": device},
-            attn_implementation="eager",
+            attn_implementation="flash_attention_2",
         )
 
         # add Flamingo special tokens to the tokenizer

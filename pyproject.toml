@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opentslm"
+version = "0.1.0"
+description = "Time-Series Language Models for Reasoning over Multivariate Medical Text- and Time-Series Data"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Stanford University, ETH Zurich, and project authors", email = "digitalhealthresearch@stanford.edu"},
+]
+keywords = ["time-series", "language-models", "medical", "machine-learning"]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "torch",
+    "joblib",
+    "argparse",
+    "tqdm",
+    "matplotlib",
+    "scikit-learn",
+    "torchinfo",
+    "transformers",
+    "chronos-forecasting",
+    "huggingface-hub",
+    "datasets",
+    "peft",
+    "requests",
+    "open-clip-torch",
+    "einops",
+    "einops-exts",
+    "pyvim",
+    "openai",
+    "wfdb",
+]
+
+[project.urls]
+Homepage = "https://github.com/StanfordBDHG/OpenTSLM"
+Repository = "https://github.com/StanfordBDHG/OpenTSLM"
+Documentation = "https://github.com/StanfordBDHG/OpenTSLM#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
