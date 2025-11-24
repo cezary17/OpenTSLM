@@ -11,9 +11,9 @@ from typing import List, Tuple, Literal
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from prompt.text_time_series_prompt import TextTimeSeriesPrompt
-from time_series_datasets.QADataset import QADataset
-from time_series_datasets.ecg_qa.ecgqa_cot_loader import load_ecg_qa_cot_splits
+from src.prompt.text_time_series_prompt import TextTimeSeriesPrompt
+from src.time_series_datasets.QADataset import QADataset
+from src.time_series_datasets.ecg_qa.ecgqa_cot_loader import load_ecg_qa_cot_splits
 import numpy as np
 
 class ECGQACoTQADataset(QADataset):
@@ -173,7 +173,7 @@ Make sure that your last word is the answer. You MUST end your response with "An
             try:
                 import pandas as pd
                 import ast
-                from time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
+                from src.time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
                 
                 # Load template answers directly
                 template_answers_path = os.path.join(ECG_QA_DIR, "ecgqa", "ptbxl", "answers_for_each_template.csv")
@@ -211,7 +211,7 @@ Make sure that your last word is the answer. You MUST end your response with "An
         try:
             import pandas as pd
             import ast
-            from time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
+            from src.time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
 
             template_answers_path = os.path.join(ECG_QA_DIR, "ecgqa", "ptbxl", "answers_for_each_template.csv")
             df = pd.read_csv(template_answers_path)
@@ -301,7 +301,7 @@ Make sure that your last word is the answer. You MUST end your response with "An
                     # Fallback: construct path from ecg_id
                     ecg_id = sample.get("ecg_id")
                     if ecg_id and isinstance(ecg_id, list) and len(ecg_id) > 0:
-                        from time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
+                        from src.time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
                         ecg_path = get_ptbxl_ecg_path(ecg_id[0]) + ".dat"
                         ecg_paths.add(ecg_path)
         
@@ -338,7 +338,7 @@ Make sure that your last word is the answer. You MUST end your response with "An
                     # Fallback: construct path from ecg_id
                     ecg_id = sample.get("ecg_id")
                     if ecg_id and isinstance(ecg_id, list) and len(ecg_id) > 0:
-                        from time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
+                        from src.time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
                         ecg_path = get_ptbxl_ecg_path(ecg_id[0]) + ".dat"
                         ecg_signal, _, _ = cls._load_ecg_data(ecg_path)
                         n_leads = ecg_signal.shape[1] if len(ecg_signal.shape) > 1 else 1
@@ -437,11 +437,11 @@ Make sure that your last word is the answer. You MUST end your response with "An
             ecg_id = row.get("ecg_id")
             if ecg_id is None:
                 raise ValueError(f"Sample missing required 'ecg_id' field: {row}")
-            
+
             if not isinstance(ecg_id, list) or len(ecg_id) == 0:
                 raise ValueError(f"Sample 'ecg_id' must be a non-empty list: {ecg_id}")
-            
-            from time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
+
+            from src.time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
             ecg_path = get_ptbxl_ecg_path(ecg_id[0]) + ".dat"
             ecg_paths = [ecg_path]
         

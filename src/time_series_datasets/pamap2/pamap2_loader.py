@@ -10,7 +10,7 @@ import os
 import zipfile
 import requests
 
-from time_series_datasets.constants import RAW_DATA as RAW_DATA_PATH
+from src.time_series_datasets.constants import RAW_DATA as RAW_DATA_PATH
 
 
 # ---------------------------

@@ -20,9 +20,9 @@ except ImportError:
         "Please install it with: pip install wfdb"
     )
 
-from prompt.text_time_series_prompt import TextTimeSeriesPrompt
-from time_series_datasets.QADataset import QADataset
-from time_series_datasets.ecg_qa.ecgqa_loader import (
+from src.prompt.text_time_series_prompt import TextTimeSeriesPrompt
+from src.time_series_datasets.QADataset import QADataset
+from src.time_series_datasets.ecg_qa.ecgqa_loader import (
     load_ecg_qa_ptbxl_splits,
     load_ecg_qa_answers,
 )
@@ -199,7 +199,7 @@ Answer: <your_answer>
         try:
             import pandas as pd
             import ast
-            from time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
+            from src.time_series_datasets.ecg_qa.ecgqa_loader import ECG_QA_DIR
 
             # Load template answers directly
             template_answers_path = os.path.join(
@@ -233,7 +233,7 @@ Answer: <your_answer>
             # Fallback: single ECG path
             ecg_id = row["ecg_id"][0] if row["ecg_id"] else None
             if ecg_id:
-                from time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
+                from src.time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
 
                 ecg_path = get_ptbxl_ecg_path(ecg_id) + ".dat"
                 ecg_paths = [ecg_path]

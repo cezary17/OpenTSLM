@@ -17,8 +17,8 @@ The ECG-QA dataset was introduced in:
 https://github.com/Jwoo5/ecg-qa
 
 Usage:
-    from time_series_datasets.ecg_qa.ECGQADataset import ECGQADataset
-    
+    from src.time_series_datasets.ecg_qa.ECGQADataset import ECGQADataset
+
     # Create dataset instance
     dataset = ECGQADataset(split="train", EOS_TOKEN="")
     

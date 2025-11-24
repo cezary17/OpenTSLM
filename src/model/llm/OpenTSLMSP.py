@@ -20,12 +20,12 @@ except ImportError:
     PEFT_AVAILABLE = False
     print("Warning: peft not available. LoRA fine-tuning will be disabled.")
 
-from model_config import ENCODER_OUTPUT_DIM
-from model.llm.TimeSeriesLLM import TimeSeriesLLM
-from model.encoder.TransformerCNNEncoder import TransformerCNNEncoder
-from model.projector.MLPProjector import MLPProjector
-from prompt.full_prompt import FullPrompt
-from time_series_datasets.util import (
+from src.model_config import ENCODER_OUTPUT_DIM
+from src.model.llm.TimeSeriesLLM import TimeSeriesLLM
+from src.model.encoder.TransformerCNNEncoder import TransformerCNNEncoder
+from src.model.projector.MLPProjector import MLPProjector
+from src.prompt.full_prompt import FullPrompt
+from src.time_series_datasets.util import (
     extend_time_series_to_match_patch_size_and_aggregate,
 )
 
@@ -48,7 +48,7 @@ class OpenTSLMSP(TimeSeriesLLM):
             llm_id,
             torch_dtype=torch.bfloat16,
             device_map={"": device},
-            attn_implementation="flash_attention_2",
+            attn_implementation="eager",
         )
         self.llm.resize_token_embeddings(len(self.tokenizer))
 

@@ -14,7 +14,7 @@ import ast
 import urllib.request
 import zipfile
 import shutil
-from time_series_datasets.constants import RAW_DATA
+from src.time_series_datasets.constants import RAW_DATA
 import math
 import logging
 from logger import get_logger

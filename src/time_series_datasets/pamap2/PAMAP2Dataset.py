@@ -8,7 +8,7 @@
 
 from typing import Tuple
 import pandas as pd
-from time_series_datasets.pamap2.pamap2_loader import ensure_pamap2_data
+from src.time_series_datasets.pamap2.pamap2_loader import ensure_pamap2_data
 from torch.utils.data import Dataset
 
 ACTIVITIY_ID_DICT = {

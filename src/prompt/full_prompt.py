@@ -7,8 +7,8 @@
 #
 
 from typing import List
-from prompt.text_prompt import TextPrompt
-from prompt.text_time_series_prompt import TextTimeSeriesPrompt
+from src.prompt.text_prompt import TextPrompt
+from src.prompt.text_time_series_prompt import TextTimeSeriesPrompt
 
 
 class FullPrompt:

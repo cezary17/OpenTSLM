@@ -12,8 +12,8 @@ from typing import List, Dict, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from torch.nn.utils.rnn import pad_sequence
 
-from model_config import ENCODER_OUTPUT_DIM
-from prompt.full_prompt import FullPrompt
+from src.model_config import ENCODER_OUTPUT_DIM
+from src.prompt.full_prompt import FullPrompt
 
 class TimeSeriesLLM(nn.Module):
     def __init__(

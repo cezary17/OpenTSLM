@@ -14,7 +14,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 
-from time_series_datasets.monash.monash_utils import (
+from src.time_series_datasets.monash.monash_utils import (
     download_and_extract_monash_ucr,
     load_from_tsfile_to_dataframe,
 )

@@ -12,9 +12,9 @@ from typing import Callable, List, Literal, Tuple
 
 import numpy as np
 import sys
-from prompt.prompt_with_answer import PromptWithAnswer
-from prompt.text_prompt import TextPrompt
-from prompt.text_time_series_prompt import TextTimeSeriesPrompt
+from src.prompt.prompt_with_answer import PromptWithAnswer
+from src.prompt.text_prompt import TextPrompt
+from src.prompt.text_time_series_prompt import TextTimeSeriesPrompt
 from torch.utils.data import Dataset
 
 

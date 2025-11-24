@@ -12,7 +12,7 @@ from datasets import Dataset
 from typing import Tuple, Dict
 import ast
 import urllib.request
-from time_series_datasets.constants import RAW_DATA
+from src.time_series_datasets.constants import RAW_DATA
 from tqdm.auto import tqdm
 from sklearn.model_selection import train_test_split
 

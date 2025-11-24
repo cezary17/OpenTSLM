@@ -8,7 +8,7 @@
 
 from typing import Literal, Optional
 
-from time_series_datasets.util import load_qa_dataset
+from src.time_series_datasets.util import load_qa_dataset
 from datasets import load_dataset
 from src.model_config import *
 

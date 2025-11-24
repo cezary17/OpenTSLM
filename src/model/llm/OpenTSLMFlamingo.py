@@ -7,8 +7,8 @@
 #
 
 from types import SimpleNamespace
-from model.encoder.CNNTokenizer import CNNTokenizer
-from model.llm.TimeSeriesFlamingoWithTrainableEncoder import (
+from src.model.encoder.CNNTokenizer import CNNTokenizer
+from src.model.llm.TimeSeriesFlamingoWithTrainableEncoder import (
     TimeSeriesFlamingoWithTrainableEncoder,
 )
 from open_flamingo.open_flamingo.src.flamingo_lm import FlamingoLMMixin
@@ -18,10 +18,10 @@ import torch._dynamo
 from typing import List, Dict, Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from model_config import ENCODER_OUTPUT_DIM
-from model.llm.TimeSeriesLLM import TimeSeriesLLM
-from prompt.full_prompt import FullPrompt
-from time_series_datasets.util import (
+from src.model_config import ENCODER_OUTPUT_DIM
+from src.model.llm.TimeSeriesLLM import TimeSeriesLLM
+from src.prompt.full_prompt import FullPrompt
+from src.time_series_datasets.util import (
     extend_time_series_to_match_patch_size_and_aggregate,
 )
 

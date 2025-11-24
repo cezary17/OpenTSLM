@@ -11,8 +11,8 @@ import torch
 from typing import List, Tuple
 from datasets import Dataset
 
-from prompt.text_time_series_prompt import TextTimeSeriesPrompt
-from time_series_datasets.QADataset import QADataset
+from src.prompt.text_time_series_prompt import TextTimeSeriesPrompt
+from src.time_series_datasets.QADataset import QADataset
 
 
 DATASET_SIZE = 200

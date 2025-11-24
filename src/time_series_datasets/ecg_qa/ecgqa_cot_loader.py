@@ -21,9 +21,9 @@ import zipfile
 import tempfile
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from time_series_datasets.constants import RAW_DATA as RAW_DATA_PATH
-from time_series_datasets.ecg_qa.ecgqa_loader import (
-    load_ecg_qa_ptbxl_splits, 
+from src.time_series_datasets.constants import RAW_DATA as RAW_DATA_PATH
+from src.time_series_datasets.ecg_qa.ecgqa_loader import (
+    load_ecg_qa_ptbxl_splits,
     download_ecg_qa_if_not_exists,
     download_ptbxl_if_not_exists
 )
@@ -152,7 +152,7 @@ def load_ecg_qa_cot_splits() -> Tuple[Dataset, Dataset, Dataset]:
     download_ecg_qa_cot_if_not_exists()
 
     import pandas as pd
-    from time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
+    from src.time_series_datasets.ecg_qa.ecgqa_loader import get_ptbxl_ecg_path
 
     def parse_ecg_id(ecg_id_raw: str) -> int:
         if ecg_id_raw is None:

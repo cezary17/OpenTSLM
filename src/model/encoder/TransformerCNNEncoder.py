@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 
 
-from model_config import TRANSFORMER_INPUT_DIM, ENCODER_OUTPUT_DIM, PATCH_SIZE
-from model.encoder.TimeSeriesEncoderBase import TimeSeriesEncoderBase
+from src.model_config import TRANSFORMER_INPUT_DIM, ENCODER_OUTPUT_DIM, PATCH_SIZE
+from src.model.encoder.TimeSeriesEncoderBase import TimeSeriesEncoderBase
 
 
 class TransformerCNNEncoder(TimeSeriesEncoderBase):
