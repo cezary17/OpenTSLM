@@ -115,6 +115,7 @@ class CurriculumTrainer:
         dist_backend: str = "nccl",
         local_rank: int = int(os.environ.get("LOCAL_RANK", 0)),
         llm_id: str = None,
+        use_bnb_optimizer: bool = False,
     ):
         """
         Initialize the curriculum trainer.
@@ -127,6 +128,7 @@ class CurriculumTrainer:
             dist_backend: Distributed backend
             local_rank: Local GPU rank
             llm_id: LLM model ID (e.g., 'google/medgemma-2b', 'meta-llama/Llama-3.2-1B')
+            use_bnb_optimizer: Use bitsandbytes 8-bit Adam optimizer (requires CUDA)
         """
         self.model_type = model_type
         self.device = device or self._get_device()
@@ -136,6 +138,7 @@ class CurriculumTrainer:
             )
         self.llm_id = llm_id
         self.llm_id_safe = self._sanitize_llm_id(llm_id)
+        self.use_bnb_optimizer = use_bnb_optimizer
 
         # Distributed training parameters
         self.gradient_checkpointing = gradient_checkpointing
@@ -219,6 +222,19 @@ class CurriculumTrainer:
         lr_base: float = None,
     ):
         """Get optimizer for the model with configurable learning rates."""
+        # Try to import bitsandbytes if requested
+        bnb_available = False
+        if self.use_bnb_optimizer:
+            try:
+                import bitsandbytes as bnb
+                bnb_available = True
+                if self.rank == 0:
+                    print("Using bitsandbytes 8-bit Adam optimizer")
+            except ImportError:
+                if self.rank == 0:
+                    print("Warning: bitsandbytes not available, falling back to PyTorch AdamW")
+                bnb_available = False
+
         # Get the underlying model (handles DDP wrapping)
         model = self._get_model()
 
@@ -253,7 +269,7 @@ class CurriculumTrainer:
                         }
                     )
                     if self.rank == 0:
-                        print(f"📊 Learning rates for {self.model_type} (with LoRA):")
+                        print(f"Learning rates for {self.model_type} (with LoRA):")
                         print(f"   Encoder LR: {encoder_lr:.2e}")
                         print(f"   Projector LR: {projector_lr:.2e}")
                         print(
@@ -265,11 +281,15 @@ class CurriculumTrainer:
                     )
             else:
                 if self.rank == 0:
-                    print(f"📊 Learning rates for {self.model_type}:")
+                    print(f"Learning rates for {self.model_type}:")
                     print(f"   Encoder LR: {encoder_lr:.2e}")
                     print(f"   Projector LR: {projector_lr:.2e}")
 
-            return AdamW(param_groups)
+            # Choose optimizer based on availability and user preference
+            if self.use_bnb_optimizer and bnb_available:
+                return bnb.optim.AdamW8bit(param_groups)
+            else:
+                return AdamW(param_groups)
         else:
             # For Flamingo, use grouped parameters
             params_to_optimize = model.named_parameters()
@@ -293,16 +313,26 @@ class CurriculumTrainer:
             base_lr = lr_base if lr_base is not None else 2e-4
 
             if self.rank == 0:
-                print(f"📊 Learning rate for {self.model_type}:")
+                print(f"Learning rate for {self.model_type}:")
                 print(f"   Base LR: {base_lr:.2e}")
 
-            return torch.optim.AdamW(
-                [
-                    {"params": params_with_wd, "weight_decay": 0.1},
-                    {"params": params_without_wd, "weight_decay": 0.0},
-                ],
-                lr=base_lr,
-            )
+            # Choose optimizer based on availability and user preference
+            if self.use_bnb_optimizer and bnb_available:
+                return bnb.optim.AdamW8bit(
+                    [
+                        {"params": params_with_wd, "weight_decay": 0.1},
+                        {"params": params_without_wd, "weight_decay": 0.0},
+                    ],
+                    lr=base_lr,
+                )
+            else:
+                return torch.optim.AdamW(
+                    [
+                        {"params": params_with_wd, "weight_decay": 0.1},
+                        {"params": params_without_wd, "weight_decay": 0.0},
+                    ],
+                    lr=base_lr,
+                )
 
     def _merge_data_loaders(
         self,
@@ -1750,6 +1780,14 @@ def main():
         "--verbose", default=False, action="store_true", help="Enable verbose logging"
     )
 
+    # Optimizer arguments
+    parser.add_argument(
+        "--use_bnb_optimizer",
+        default=False,
+        action="store_true",
+        help="Use bitsandbytes 8-bit Adam optimizer (requires CUDA and bitsandbytes installed)",
+    )
+
     args = parser.parse_args()
 
     # Set up global logging
@@ -1765,6 +1803,7 @@ def main():
         dist_backend=args.dist_backend,
         local_rank=args.local_rank,
         llm_id=args.llm_id,
+        use_bnb_optimizer=args.use_bnb_optimizer,
     )
 
     # Run curriculum

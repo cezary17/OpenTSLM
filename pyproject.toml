@@ -7,7 +7,7 @@ name = "opentslm"
 version = "0.1.0"
 description = "Time-Series Language Models for Reasoning over Multivariate Medical Text- and Time-Series Data"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Stanford University, ETH Zurich, and project authors", email = "digitalhealthresearch@stanford.edu"},
