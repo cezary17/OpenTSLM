@@ -35,7 +35,6 @@ def check_attention_implementation(model_id):
             attn_implementation="flash_attention_2",
         )
         print("✓ Flash Attention 2: SUCCESS")
-        print(f"  Model config: {model_fa2.config.attn_implementation if hasattr(model_fa2.config, 'attn_implementation') else 'N/A'}")
         del model_fa2
         torch.cuda.empty_cache()
     except Exception as e:
@@ -51,10 +50,10 @@ def check_attention_implementation(model_id):
             trust_remote_code=True,
             cache_dir=None,
             device_map={"": device},
+            dtype=torch.bfloat16,
             attn_implementation="sdpa",
         )
         print("✓ SDPA: SUCCESS")
-        print(f"  Model config: {model_sdpa.config.attn_implementation if hasattr(model_sdpa.config, 'attn_implementation') else 'N/A'}")
         del model_sdpa
         torch.cuda.empty_cache()
     except Exception as e:

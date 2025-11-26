@@ -138,6 +138,11 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
             **flamingo_kwargs,
         )
 
+        # Cast Flamingo-specific layers to bfloat16 to match the language model
+        model.vision_encoder.to(torch.bfloat16)
+        model.perceiver.to(torch.bfloat16)
+        model.lang_encoder.gated_cross_attn_layers.to(torch.bfloat16)
+
         # Freeze all parameters
         model.requires_grad_(False)
         assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 0
@@ -187,7 +192,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
 
             return torch.stack(padded_series)
 
-        cast_dtype = None
+        cast_dtype = torch.bfloat16
         tokenizer = self.text_tokenizer
         media_token_id = tokenizer("<image>", add_special_tokens=False)["input_ids"][-1]
         endofchunk_token_id = tokenizer("<|endofchunk|>", add_special_tokens=False)[
