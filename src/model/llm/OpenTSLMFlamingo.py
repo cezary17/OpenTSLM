@@ -65,6 +65,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
             trust_remote_code=True,
             cache_dir=None,
             device_map={"": device},
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
         )
 
