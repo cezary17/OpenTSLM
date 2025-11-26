@@ -9,7 +9,6 @@ def check_attention_implementation(model_id):
 
     Args:
         model_id: HuggingFace model ID or local path
-        device: Device to load the model on (default: cuda)
     """
     print(f"Testing model: {model_id}")
     print(f"PyTorch version: {torch.__version__}")
@@ -32,6 +31,7 @@ def check_attention_implementation(model_id):
             trust_remote_code=True,
             cache_dir=None,
             device_map={"": device},
+            dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
         )
         print("✓ Flash Attention 2: SUCCESS")
