@@ -751,7 +751,7 @@ class CurriculumTrainer:
         test_loss = 0.0
 
         # Set higher max_tokens for generation during evaluation
-        max_new_tokens = 2000
+        max_new_tokens = 512
 
         # Prepare per-rank streaming writer for test predictions
         results_file_rank = os.path.join(
@@ -1066,10 +1066,17 @@ class CurriculumTrainer:
                 distribute_data=self.world_size > 1,
             )
 
+        # Use batched generation for faster evaluation
+        # Eval batch size is typically smaller than training due to generation memory overhead
+        eval_batch_size = batch_size if batch_size is not None else min(BATCH_SIZE, 8)
+
+        if self.rank == 0:
+            print(f"Evaluation batch size: {eval_batch_size} (enables batched generation)")
+
         val_loader = self._merge_data_loaders(
             [dataset_class("validation", EOS_TOKEN=self._get_model().get_eos_token())],
             shuffle=False,
-            batch_size=1,
+            batch_size=eval_batch_size,
             patch_size=PATCH_SIZE,
             distribute_data=False,  # Don't distribute validation
         )
@@ -1077,7 +1084,7 @@ class CurriculumTrainer:
         test_loader = self._merge_data_loaders(
             [dataset_class("test", EOS_TOKEN=self._get_model().get_eos_token())],
             shuffle=False,
-            batch_size=1,
+            batch_size=eval_batch_size,
             patch_size=PATCH_SIZE,
             distribute_data=self.world_size > 1,
         )
