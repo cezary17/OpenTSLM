@@ -10,7 +10,8 @@
 # Hyper‑parameters
 # ---------------------------
 
-BATCH_SIZE = 4
+BATCH_SIZE = 16
+EVAL_BATCH_SIZE = 32
  
 PATCH_SIZE = 4
 NUM_EPOCHS = 20  # allow many but we will early‑stop

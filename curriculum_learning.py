@@ -59,6 +59,7 @@ from model_config import (
     PATCH_SIZE,
     WARMUP_FRAC,
     WEIGHT_DECAY,
+    EVAL_BATCH_SIZE
 )
 
 
@@ -1068,7 +1069,7 @@ class CurriculumTrainer:
 
         # Use batched generation for faster evaluation
         # Eval batch size is typically smaller than training due to generation memory overhead
-        eval_batch_size = batch_size if batch_size is not None else min(BATCH_SIZE, 8)
+        eval_batch_size = EVAL_BATCH_SIZE
 
         if self.rank == 0:
             print(f"Evaluation batch size: {eval_batch_size} (enables batched generation)")
