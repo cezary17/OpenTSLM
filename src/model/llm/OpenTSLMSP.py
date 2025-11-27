@@ -42,6 +42,8 @@ class OpenTSLMSP(TimeSeriesLLM):
         self.tokenizer = AutoTokenizer.from_pretrained(llm_id, use_fast=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        # Use left padding for decoder-only models during batched generation
+        self.tokenizer.padding_side = 'left'
 
         # 2) load LLM
         self.llm = AutoModelForCausalLM.from_pretrained(

@@ -76,6 +76,8 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
         if text_tokenizer.pad_token is None:
             text_tokenizer.add_special_tokens({"pad_token": "<PAD>"})
             text_tokenizer.pad_token = "<PAD>"
+        # Use left padding for decoder-only models during batched generation
+        text_tokenizer.padding_side = 'left'
 
         # convert LM to FlamingoLM
         extend_instance(lang_encoder, FlamingoLMMixin)
