@@ -10,3 +10,6 @@ raw_data
 *.zip
 ./__pycache__
 .env
+
+results/
+data/
