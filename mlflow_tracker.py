@@ -1,8 +1,11 @@
 import os
+import sys
 import json
 from typing import Any
 from dotenv import load_dotenv
 from coolname import generate_slug
+from io import StringIO
+import traceback
 
 
 class MLflowTracker:
@@ -30,6 +33,13 @@ class MLflowTracker:
         self.rank = rank
         self.enabled = enabled and (rank == 0)
         self.active_run = None
+
+        # Stdout/stderr capture
+        self.stdout_buffer = StringIO()
+        self.stderr_buffer = StringIO()
+        self.original_stdout = None
+        self.original_stderr = None
+        self.capturing = False
 
         # Only import and initialize MLflow on rank 0
         if self.enabled:
@@ -255,19 +265,126 @@ class MLflowTracker:
         except Exception as e:
             print(f"⚠️  Could not log model summary: {e}")
 
-    def end_stage_run(self, status: str = "FINISHED"):
+    def start_stdout_capture(self):
+        """Start capturing stdout and stderr."""
+        if not self.enabled or self.capturing:
+            return
+
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+
+        # Create tee-like objects that write to both original and buffer
+        class TeeWriter:
+            def __init__(self, original, buffer):
+                self.original = original
+                self.buffer = buffer
+
+            def write(self, data):
+                self.original.write(data)
+                self.buffer.write(data)
+                self.original.flush()
+
+            def flush(self):
+                self.original.flush()
+
+        sys.stdout = TeeWriter(self.original_stdout, self.stdout_buffer)
+        sys.stderr = TeeWriter(self.original_stderr, self.stderr_buffer)
+        self.capturing = True
+
+        print("Started capturing stdout/stderr for MLflow logging")
+
+    def stop_stdout_capture(self):
+        """Stop capturing stdout and stderr."""
+        if not self.enabled or not self.capturing:
+            return
+
+        # Restore original streams
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
+        self.capturing = False
+
+        print("Stopped capturing stdout/stderr")
+
+    def save_and_log_stdout(self, stage_name: str, results_dir: str):
+        """
+        Save captured stdout/stderr to files and log as artifacts.
+
+        Args:
+            stage_name: Name of the stage
+            results_dir: Base results directory
+        """
+        if not self.enabled or self.active_run is None:
+            return
+
+        try:
+            # Create logs directory
+            stage_dir = os.path.join(results_dir, stage_name)
+            logs_dir = os.path.join(stage_dir, "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+
+            # Save stdout
+            stdout_content = self.stdout_buffer.getvalue()
+            if stdout_content:
+                stdout_path = os.path.join(logs_dir, "stdout.log")
+                with open(stdout_path, "w", encoding="utf-8") as f:
+                    f.write(stdout_content)
+                self.mlflow.log_artifact(stdout_path, "logs")
+                print(f"   Logged stdout: {stdout_path}")
+
+            # Save stderr
+            stderr_content = self.stderr_buffer.getvalue()
+            if stderr_content:
+                stderr_path = os.path.join(logs_dir, "stderr.log")
+                with open(stderr_path, "w", encoding="utf-8") as f:
+                    f.write(stderr_content)
+                self.mlflow.log_artifact(stderr_path, "logs")
+                print(f"   Logged stderr: {stderr_path}")
+
+            # Create combined log
+            if stdout_content or stderr_content:
+                combined_path = os.path.join(logs_dir, "combined.log")
+                with open(combined_path, "w", encoding="utf-8") as f:
+                    if stdout_content:
+                        f.write("=" * 80 + "\n")
+                        f.write("STDOUT\n")
+                        f.write("=" * 80 + "\n")
+                        f.write(stdout_content)
+                        f.write("\n\n")
+                    if stderr_content:
+                        f.write("=" * 80 + "\n")
+                        f.write("STDERR\n")
+                        f.write("=" * 80 + "\n")
+                        f.write(stderr_content)
+                self.mlflow.log_artifact(combined_path, "logs")
+                print(f"   Logged combined log: {combined_path}")
+
+        except Exception as e:
+            print(f"WARNING: Could not save stdout/stderr logs: {e}")
+            traceback.print_exc()
+
+    def end_stage_run(self, status: str = "FINISHED", stage_name: str = None, results_dir: str = None):
         """
         End the current stage run.
 
         Args:
             status: Run status (FINISHED, FAILED, KILLED)
+            stage_name: Name of the stage (for logging stdout)
+            results_dir: Base results directory (for logging stdout)
         """
         if not self.enabled or self.active_run is None:
             return
 
+        # Save and log stdout/stderr before ending the run
+        if stage_name and results_dir:
+            self.save_and_log_stdout(stage_name, results_dir)
+
         self.mlflow.end_run(status=status)
         print(f"📊 Ended MLflow run with status: {status}")
         self.active_run = None
+
+        # Clear buffers for next run
+        self.stdout_buffer = StringIO()
+        self.stderr_buffer = StringIO()
 
 
     def _flatten_params(self, params: dict[str, Any], parent_key: str = "") -> dict[str, Any]:

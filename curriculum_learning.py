@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src"
 
 import json
 import argparse
+import logging
 from typing import List, Optional, Dict, Any, Callable
 from time_series_datasets.TSQADataset import TSQADataset
 from time_series_datasets.m4.M4QADataset import M4QADataset
@@ -31,6 +32,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm.auto import tqdm
 from transformers import get_linear_schedule_with_warmup
+from transformers import logging as transformers_logging
 
 from model.llm.OpenTSLMFlamingo import OpenTSLMFlamingo
 from model.llm.OpenTSLMSP import OpenTSLMSP
@@ -465,6 +467,185 @@ class CurriculumTrainer:
         # Append the current epoch's losses
         with open(loss_history_file, "a") as f:
             f.write(f"{epoch}\t{train_loss:.6f}\t{val_loss:.6f}\n")
+
+    def _log_nan_loss_event(
+        self, stage: str, epoch: int, batch_idx: int, global_step: int,
+        batch: List[Dict], learning_rate: float
+    ) -> Dict[str, Any]:
+        """Log detailed information when NaN loss is detected during training.
+
+        Args:
+            stage: Current training stage
+            epoch: Current epoch number
+            batch_idx: Batch index within the epoch
+            global_step: Global training step
+            batch: The batch that caused NaN loss
+            learning_rate: Current learning rate
+
+        Returns:
+            Dictionary containing detailed NaN event information
+        """
+        if self.rank != 0:
+            return None  # Only log on rank 0
+
+        print(f"\n{'='*80}")
+        print(f"NaN LOSS DETECTED at epoch {epoch}, batch {batch_idx}, global_step {global_step}")
+        print(f"Learning rate: {learning_rate:.2e}")
+        print(f"{'='*80}")
+
+        # Collect logits and probability statistics
+        logit_stats = None
+        prob_stats = None
+        try:
+            with torch.no_grad():
+                model = self._get_model()
+
+                # Get model outputs with logits
+                if self.model_type == "OpenTSLMSP":
+                    inputs_embeds, attention_mask = model.pad_and_apply_batch(batch)
+                    answers = [b["answer"] for b in batch]
+                    ans_tok = model.tokenizer(
+                        answers, return_tensors="pt", padding=True, truncation=True
+                    )
+                    ans_ids = ans_tok.input_ids.to(model.device, non_blocking=True)
+                    ans_mask = ans_tok.attention_mask.to(model.device, non_blocking=True)
+                    ans_emb = model.llm.get_input_embeddings()(ans_ids)
+
+                    inputs_embeds = torch.cat([inputs_embeds, ans_emb], dim=1)
+                    attention_mask = torch.cat([attention_mask, ans_mask], dim=1)
+
+                    outputs = model.llm(
+                        inputs_embeds=inputs_embeds,
+                        attention_mask=attention_mask,
+                        return_dict=True,
+                    )
+                    logits = outputs.logits
+                else:  # OpenTSLMFlamingo
+                    input_ids, images, attention_mask, labels = model.pad_and_apply_batch(
+                        batch, include_labels=False
+                    )
+                    output = model.model(
+                        vision_x=images,
+                        lang_x=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels,
+                    )
+                    logits = output[1] if len(output) > 1 else None
+
+                if logits is not None:
+                    # Compute probability distribution
+                    probs = torch.nn.functional.softmax(logits, dim=-1)
+
+                    logit_stats = {
+                        "min": float(logits.min()),
+                        "max": float(logits.max()),
+                        "mean": float(logits.mean()),
+                        "std": float(logits.std()),
+                        "has_nan": bool(torch.isnan(logits).any()),
+                        "has_inf": bool(torch.isinf(logits).any()),
+                        "has_extreme_values": bool((logits.abs() > 1e4).any()),
+                    }
+
+                    prob_stats = {
+                        "min": float(probs.min()),
+                        "max": float(probs.max()),
+                        "mean": float(probs.mean()),
+                        "std": float(probs.std()),
+                        "has_nan": bool(torch.isnan(probs).any()),
+                        "has_inf": bool(torch.isinf(probs).any()),
+                        "has_negative": bool((probs < 0).any()),
+                        "sum_per_position_min": float(probs.sum(dim=-1).min()),
+                        "sum_per_position_max": float(probs.sum(dim=-1).max()),
+                    }
+
+                    print(f"\nLogit Statistics:")
+                    print(f"  Min: {logit_stats['min']:.4f}, Max: {logit_stats['max']:.4f}")
+                    print(f"  Mean: {logit_stats['mean']:.4f}, Std: {logit_stats['std']:.4f}")
+                    print(f"  Has NaN: {logit_stats['has_nan']}, Has Inf: {logit_stats['has_inf']}")
+                    print(f"  Has extreme values (>1e4): {logit_stats['has_extreme_values']}")
+
+                    print(f"\nProbability Statistics:")
+                    print(f"  Min: {prob_stats['min']:.6f}, Max: {prob_stats['max']:.6f}")
+                    print(f"  Mean: {prob_stats['mean']:.6f}, Std: {prob_stats['std']:.6f}")
+                    print(f"  Has NaN: {prob_stats['has_nan']}, Has Inf: {prob_stats['has_inf']}")
+                    print(f"  Has negative: {prob_stats['has_negative']}")
+                    print(f"  Sum per position - Min: {prob_stats['sum_per_position_min']:.6f}, Max: {prob_stats['sum_per_position_max']:.6f}")
+        except Exception as e:
+            print(f"WARNING: Could not compute logit/probability statistics: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Generate predictions to see what the model would produce
+        try:
+            with torch.no_grad():
+                predictions = self._get_model().generate(batch, max_new_tokens=128)
+        except Exception as e:
+            predictions = [f"ERROR: Could not generate prediction: {e}"] * len(batch)
+
+        # Collect detailed sample information
+        nan_samples = []
+        for sample_idx, (sample, pred) in enumerate(zip(batch, predictions)):
+            sample_info = {
+                "sample_idx": sample_idx,
+                "pre_prompt": sample.get("pre_prompt", ""),
+                "time_series_text": sample.get("time_series_text", []),
+                "post_prompt": sample.get("post_prompt", ""),
+                "gold_answer": sample.get("answer", ""),
+                "generated_response": pred,
+            }
+
+            # Add time series shape and statistics
+            if "time_series" in sample:
+                ts_data = sample["time_series"]
+                if isinstance(ts_data, list):
+                    sample_info["time_series_shapes"] = [
+                        ts.shape if hasattr(ts, "shape") else type(ts).__name__
+                        for ts in ts_data
+                    ]
+                    sample_info["time_series_stats"] = []
+                    for ts in ts_data:
+                        import numpy as np
+                        if isinstance(ts, np.ndarray):
+                            sample_info["time_series_stats"].append({
+                                "min": float(np.min(ts)),
+                                "max": float(np.max(ts)),
+                                "mean": float(np.mean(ts)),
+                                "std": float(np.std(ts)),
+                                "has_nan": bool(np.isnan(ts).any()),
+                                "has_inf": bool(np.isinf(ts).any()),
+                            })
+
+            nan_samples.append(sample_info)
+
+            # Print first sample details to console
+            if sample_idx == 0:
+                print(f"\nFirst sample in NaN batch:")
+                print(f"Pre-prompt: {sample.get('pre_prompt', '')[:200]}...")
+                print(f"Time series text: {sample.get('time_series_text', [])}")
+                if "time_series_stats" in sample_info:
+                    print(f"Time series stats: {sample_info['time_series_stats']}")
+                print(f"Post-prompt: {sample.get('post_prompt', '')[:200]}...")
+                print(f"Gold answer: {sample.get('answer', '')}")
+                print(f"Generated: {pred}")
+
+        print(f"{'='*80}\n")
+
+        # Return event information
+        event_info = {
+            "epoch": epoch,
+            "batch": batch_idx,
+            "global_step": global_step,
+            "learning_rate": learning_rate,
+            "samples": nan_samples,
+        }
+
+        # Add logit and probability stats if available
+        if logit_stats is not None:
+            event_info["logit_stats"] = logit_stats
+        if prob_stats is not None:
+            event_info["probability_stats"] = prob_stats
+
+        return event_info
 
     def _save_example_responses(
         self, stage: str, epoch: int, example_responses: List[Dict[str, any]]
@@ -1028,6 +1209,45 @@ class CurriculumTrainer:
         if batch_size is None:
             batch_size = BATCH_SIZE
 
+        # Wrap entire training in try-except to ensure logs are saved even on failure
+        try:
+            return self._train_stage_impl(
+                stage_name, dataset_class, num_epochs, lr_encoder, lr_projector,
+                lr_base, metric_func, batch_size, eval_only, sampler
+            )
+        except Exception as e:
+            if self.rank == 0:
+                print(f"\nERROR in {stage_name}: {e}")
+                import traceback
+                traceback.print_exc()
+
+            # Save stdout/stderr logs on failure
+            self.mlflow_tracker.end_stage_run(
+                status="FAILED",
+                stage_name=stage_name,
+                results_dir=self.results_dir
+            )
+            raise
+        finally:
+            # Stop capturing regardless of success/failure
+            self.mlflow_tracker.stop_stdout_capture()
+
+    def _train_stage_impl(
+        self,
+        stage_name: str,
+        dataset_class,
+        num_epochs: int,
+        lr_encoder: float,
+        lr_projector: float,
+        lr_base: float,
+        metric_func: Callable = None,
+        batch_size: int = None,
+        eval_only: bool = False,
+        sampler=None,
+    ) -> Dict[str, Any]:
+        """Implementation of generic training function for any stage."""
+        epoch = None
+
         if self.rank == 0:
             print(f"\n🚀 Starting {stage_name} Training with {self.model_type}")
             if eval_only:
@@ -1130,6 +1350,9 @@ class CurriculumTrainer:
             stage_params["lr_base"] = lr_base
 
         self.mlflow_tracker.start_stage_run(stage_name, stage_params)
+
+        # Start capturing stdout/stderr for this stage
+        self.mlflow_tracker.start_stdout_capture()
 
         # Log model summary
         self.mlflow_tracker.log_model_summary(self._get_model())
@@ -1266,20 +1489,44 @@ class CurriculumTrainer:
                             else "No CUDA"
                         )
                     optimizer.zero_grad()
+
+                    # Validate input data for NaN/Inf
+                    has_invalid_data = False
+                    for sample in batch:
+                        ts_data = sample.get("time_series", [])
+                        for ts in ts_data:
+                            if isinstance(ts, torch.Tensor):
+                                if torch.isnan(ts).any() or torch.isinf(ts).any():
+                                    print(f"WARNING: Invalid time series data in batch!")
+                                    has_invalid_data = True
+                                    break
+                        if has_invalid_data:
+                            break
+
+                    if has_invalid_data:
+                        if self.rank == 0:
+                            print(f"WARNING: Skipping batch {i} due to invalid input data")
+                        continue
+
                     loss = self._get_model().compute_loss(batch)
 
                     # Check for NaN loss
-                    if torch.isnan(loss):
+                    if torch.isnan(loss) or torch.isinf(loss):
                         global_step = (epoch - 1) * len(train_loader) + i
-                        nan_event = {
-                            "epoch": epoch,
-                            "batch": i,
-                            "global_step": global_step,
-                            "learning_rate": scheduler.get_last_lr()[0],
-                        }
-                        nan_loss_events.append(nan_event)
+                        nan_event = self._log_nan_loss_event(
+                            stage_name,
+                            epoch,
+                            i,
+                            global_step,
+                            batch,
+                            scheduler.get_last_lr()[0]
+                        )
+                        if nan_event is not None:
+                            nan_loss_events.append(nan_event)
+
                         if self.rank == 0:
-                            print(f"\nNaN loss detected at epoch {epoch}, batch {i}, global_step {global_step}")
+                            print(f"WARNING: Skipping batch {i} due to NaN/Inf loss, continuing training...")
+                        continue
 
                     loss.backward()
 
@@ -1457,8 +1704,12 @@ class CurriculumTrainer:
         # Log artifacts to MLflow
         self.mlflow_tracker.log_stage_artifacts(stage_name, self.results_dir)
 
-        # End stage run
-        self.mlflow_tracker.end_stage_run(status="FINISHED")
+        # End stage run and save stdout/stderr logs
+        self.mlflow_tracker.end_stage_run(
+            status="FINISHED",
+            stage_name=stage_name,
+            results_dir=self.results_dir
+        )
 
         return metrics
 
@@ -1913,6 +2164,39 @@ class CurriculumTrainer:
                     print(f"ℹ️  LoRA not configured for {stage_name}")
 
 
+def setup_debug_logging():
+    """Configure logging levels for HuggingFace and PyTorch to DEBUG."""
+    # Set HuggingFace transformers logging to DEBUG using their built-in utility
+    transformers_logging.set_verbosity_debug()
+    transformers_logging.enable_default_handler()
+    transformers_logging.enable_explicit_format()
+
+    # Also set standard Python logging for transformers
+    logging.getLogger("transformers").setLevel(logging.DEBUG)
+    logging.getLogger("transformers.modeling_utils").setLevel(logging.DEBUG)
+    logging.getLogger("transformers.configuration_utils").setLevel(logging.DEBUG)
+    logging.getLogger("transformers.tokenization_utils").setLevel(logging.DEBUG)
+    logging.getLogger("transformers.generation").setLevel(logging.DEBUG)
+
+    # Set PyTorch logging to DEBUG
+    logging.getLogger("torch").setLevel(logging.DEBUG)
+    logging.getLogger("torch.nn").setLevel(logging.DEBUG)
+    logging.getLogger("torch.optim").setLevel(logging.DEBUG)
+    logging.getLogger("torch.distributed").setLevel(logging.DEBUG)
+    logging.getLogger("torch.cuda").setLevel(logging.DEBUG)
+
+    # Set Open Flamingo logging to DEBUG
+    logging.getLogger("open_flamingo").setLevel(logging.DEBUG)
+
+    # Set root logger format
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.DEBUG
+    )
+
+    print("Set HuggingFace and PyTorch logging to DEBUG level")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Curriculum Learning for OpenTSLM Models"
@@ -1994,6 +2278,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Set up HuggingFace and PyTorch debug logging
+    setup_debug_logging()
 
     # Set up global logging
     set_global_verbose(args.verbose)
