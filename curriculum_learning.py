@@ -47,7 +47,8 @@ from model_config import (
     PATCH_SIZE,
     WARMUP_FRAC,
     WEIGHT_DECAY,
-    EVAL_BATCH_SIZE
+    EVAL_BATCH_SIZE,
+    MAX_SAMPLES
 )
 
 
@@ -464,6 +465,90 @@ class CurriculumTrainer:
         # Append the current epoch's losses
         with open(loss_history_file, "a") as f:
             f.write(f"{epoch}\t{train_loss:.6f}\t{val_loss:.6f}\n")
+
+    def _save_example_responses(
+        self, stage: str, epoch: int, example_responses: List[Dict[str, any]]
+    ):
+        """Save example validation responses to a text file and log as MLflow artifact."""
+        if dist.is_initialized() and self.rank != 0:
+            return  # Only save on rank 0 for distributed training
+
+        checkpoint_dir = os.path.join(self.results_dir, stage, "checkpoints")
+        examples_file = os.path.join(checkpoint_dir, f"example_responses_epoch{epoch}.txt")
+
+        # Ensure the directory exists
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        # Write examples to file with formatting
+        with open(examples_file, "w", encoding="utf-8") as f:
+            f.write(f"=" * 80 + "\n")
+            f.write(f"Example Validation Responses - Epoch {epoch}\n")
+            f.write(f"Stage: {stage}\n")
+            f.write(f"=" * 80 + "\n\n")
+
+            for idx, example in enumerate(example_responses, 1):
+                f.write(f"{'-' * 80}\n")
+                f.write(f"Example {idx}/{len(example_responses)}\n")
+                f.write(f"{'-' * 80}\n\n")
+
+                # Write the full prompt (pre_prompt + time_series + post_prompt)
+                f.write("FULL PROMPT:\n")
+                f.write("-" * 40 + "\n")
+                f.write(f"{example['pre_prompt']}\n")
+
+                # Write time series text descriptions
+                f.write("\nTIME SERIES TEXT:\n")
+                ts_text = example['time_series_text']
+                if isinstance(ts_text, list):
+                    for i, text in enumerate(ts_text):
+                        f.write(f"  [{i}] {text}\n")
+                else:
+                    f.write(f"{ts_text}\n")
+
+                # Write actual time series numerical data
+                f.write("\nTIME SERIES DATA:\n")
+                ts_data = example.get('time_series', [])
+                if isinstance(ts_data, list):
+                    for i, ts_array in enumerate(ts_data):
+                        import numpy as np
+                        if isinstance(ts_array, np.ndarray):
+                            # Format time series array with limited precision
+                            ts_str = np.array2string(
+                                ts_array,
+                                separator=', ',
+                                formatter={'float_kind': lambda x: f'{x:.4f}'},
+                                threshold=50,  # Show first/last 50 if longer
+                                edgeitems=25   # Show 25 items at each edge
+                            )
+                            f.write(f"  [{i}] Shape: {ts_array.shape}, Data: {ts_str}\n")
+                        else:
+                            f.write(f"  [{i}] {ts_array}\n")
+                else:
+                    f.write(f"{ts_data}\n")
+
+                f.write(f"\n{example['post_prompt']}\n")
+                f.write("-" * 40 + "\n\n")
+
+                # Write model's generated response
+                f.write("MODEL RESPONSE:\n")
+                f.write("-" * 40 + "\n")
+                f.write(f"{example['generated']}\n")
+                f.write("-" * 40 + "\n\n")
+
+                # Write gold answer
+                f.write("GOLD ANSWER:\n")
+                f.write("-" * 40 + "\n")
+                f.write(f"{example['gold_answer']}\n")
+                f.write("-" * 40 + "\n\n")
+
+        # Log as MLflow artifact
+        try:
+            self.mlflow_tracker.log_artifact(examples_file, artifact_path="example_responses")
+            if self.rank == 0:
+                print(f"Saved example responses to: {examples_file}")
+        except Exception as e:
+            if self.rank == 0:
+                print(f"Warning: Could not log example responses to MLflow: {e}")
 
     def _display_loss_history(self, stage: str):
         """Display the loss history for a stage if available."""
@@ -1049,8 +1134,6 @@ class CurriculumTrainer:
         # Log model summary
         self.mlflow_tracker.log_model_summary(self._get_model())
 
-        self.mlflow_tracker.mlflow.log_metric("test_metric", 1234)
-
         # Initialize optimizer and scheduler
         optimizer = self._get_optimizer(batch_size, lr_encoder, lr_projector, lr_base)
 
@@ -1063,7 +1146,7 @@ class CurriculumTrainer:
                 train_loader = self._merge_data_loaders(
                     [
                         dataset_class(
-                            "train", EOS_TOKEN=self._get_model().get_eos_token()
+                            "train", EOS_TOKEN=self._get_model().get_eos_token(), max_samples=MAX_SAMPLES
                         )
                     ],
                     shuffle=True,
@@ -1073,7 +1156,7 @@ class CurriculumTrainer:
                 )
             else:
                 train_dataset = dataset_class(
-                    "train", EOS_TOKEN=self._get_model().get_eos_token()
+                    "train", EOS_TOKEN=self._get_model().get_eos_token(), max_samples=MAX_SAMPLES
                 )
                 train_loader = DataLoader(
                     train_dataset,
@@ -1084,7 +1167,7 @@ class CurriculumTrainer:
                 )
         else:
             train_loader = self._merge_data_loaders(
-                [dataset_class("train", EOS_TOKEN=self._get_model().get_eos_token())],
+                [dataset_class("train", EOS_TOKEN=self._get_model().get_eos_token(), max_samples=MAX_SAMPLES)],
                 shuffle=True,
                 batch_size=batch_size,
                 patch_size=PATCH_SIZE,
@@ -1095,7 +1178,7 @@ class CurriculumTrainer:
         eval_batch_size = EVAL_BATCH_SIZE
 
         val_loader = self._merge_data_loaders(
-            [dataset_class("validation", EOS_TOKEN=self._get_model().get_eos_token())],
+            [dataset_class("validation", EOS_TOKEN=self._get_model().get_eos_token(), max_samples=MAX_SAMPLES)],
             shuffle=False,
             batch_size=eval_batch_size,
             patch_size=PATCH_SIZE,
@@ -1103,7 +1186,7 @@ class CurriculumTrainer:
         )
 
         test_loader = self._merge_data_loaders(
-            [dataset_class("test", EOS_TOKEN=self._get_model().get_eos_token())],
+            [dataset_class("test", EOS_TOKEN=self._get_model().get_eos_token(), max_samples=MAX_SAMPLES)],
             shuffle=False,
             batch_size=eval_batch_size,
             patch_size=PATCH_SIZE,
@@ -1148,6 +1231,8 @@ class CurriculumTrainer:
             # Training loop
             epochs_no_improve = 0
             start_epoch = best_epoch + 1 if best_epoch is not None else 1
+            nan_loss_events = []  # Track NaN loss events
+
             for epoch in range(start_epoch, num_epochs + 1):
                 # Set epoch for distributed sampler
                 if hasattr(train_loader.sampler, "set_epoch"):
@@ -1182,6 +1267,20 @@ class CurriculumTrainer:
                         )
                     optimizer.zero_grad()
                     loss = self._get_model().compute_loss(batch)
+
+                    # Check for NaN loss
+                    if torch.isnan(loss):
+                        global_step = (epoch - 1) * len(train_loader) + i
+                        nan_event = {
+                            "epoch": epoch,
+                            "batch": i,
+                            "global_step": global_step,
+                            "learning_rate": scheduler.get_last_lr()[0],
+                        }
+                        nan_loss_events.append(nan_event)
+                        if self.rank == 0:
+                            print(f"\nNaN loss detected at epoch {epoch}, batch {i}, global_step {global_step}")
+
                     loss.backward()
 
                     # Handle gradient clipping for distributed training
@@ -1213,13 +1312,33 @@ class CurriculumTrainer:
                 # Validation
                 val_loss = 0.0
                 self.model.eval()
+                example_responses = []
+                num_examples_to_log = 3  # Log 3 examples per epoch
+
                 with torch.no_grad():
-                    for batch in tqdm(
+                    for batch_idx, batch in enumerate(tqdm(
                         val_loader,
                         desc=f"Validating {stage_name}",
                         disable=self.rank != 0,
-                    ):
+                    )):
                         val_loss += self._get_model().compute_loss(batch).item()
+
+                        # Collect example responses from the first batch only
+                        if batch_idx == 0 and self.rank == 0:
+                            # Generate predictions for examples
+                            predictions = self._get_model().generate(batch, max_new_tokens=256)
+
+                            # Collect up to num_examples_to_log examples
+                            for sample, pred in zip(batch[:num_examples_to_log], predictions[:num_examples_to_log]):
+                                example = {
+                                    "pre_prompt": sample["pre_prompt"],
+                                    "time_series_text": sample["time_series_text"],
+                                    "time_series": sample["time_series"],
+                                    "post_prompt": sample["post_prompt"],
+                                    "generated": pred,
+                                    "gold_answer": sample["answer"],
+                                }
+                                example_responses.append(example)
 
                 avg_val_loss = val_loss / len(val_loader)
 
@@ -1240,8 +1359,25 @@ class CurriculumTrainer:
                     "learning_rate": scheduler.get_last_lr()[0]
                 }, step=epoch)
 
+                # Save and log example responses
+                if example_responses and self.rank == 0:
+                    self._save_example_responses(stage_name, epoch, example_responses)
+
                 # Save loss history for this epoch
                 self._save_loss_history(stage_name, epoch, avg_train_loss, avg_val_loss)
+
+                # Log NaN loss events if any occurred this epoch
+                if nan_loss_events and self.rank == 0:
+                    nan_log_path = os.path.join(
+                        self.results_dir, stage_name, "checkpoints", "nan_loss.json"
+                    )
+                    with open(nan_log_path, "w") as f:
+                        json.dump({
+                            "nan_events": nan_loss_events,
+                            "total_nan_count": len(nan_loss_events),
+                            "last_epoch": epoch
+                        }, f, indent=2)
+                    self.mlflow_tracker.log_artifact(nan_log_path, "diagnostics")
 
                 # Early stopping - all ranks need to make the same decision
                 should_save = avg_val_loss + 1e-4 < best_val_loss

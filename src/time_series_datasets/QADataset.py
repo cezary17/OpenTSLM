@@ -25,6 +25,7 @@ class QADataset(Dataset, ABC):
         EOS_TOKEN: str,
         format_sample_str: bool = False,
         time_series_format_function: Callable[[np.ndarray], str] | None = None,
+        max_samples: int | None = None,
     ):
         """
         Initializes the dataset by loading and formatting the specified data split.
@@ -33,27 +34,34 @@ class QADataset(Dataset, ABC):
             EOS_TOKEN (str): End-of-sequence token to be used in formatting.
             format_sample_str (bool, optional): If True, applies a string formatting function to each sample. Defaults to False.
             time_series_format_function (Callable[[np.ndarray], str] | None, optional): Optional function to format time series data as strings. Used only if `format_sample_str` is True.
+            max_samples (int | None, optional): Maximum number of samples to use per split. If None, uses all samples.
         Raises:
             RuntimeError: If the provided split is not one of "train", "test", or "validation".
         Notes:
             - The datasets for each split are loaded and formatted only once per class.
             - The formatted datasets are cached as class attributes for subsequent initializations.
         """
-        
+
         self.EOS_TOKEN = EOS_TOKEN
         if not hasattr(self.__class__, "loaded"):
             train, val, test = self._load_splits()
 
+            # Limit samples if max_samples is specified
+            if max_samples is not None:
+                train = train.select(range(min(max_samples, len(train))))
+                val = val.select(range(min(max_samples, len(val))))
+                test = test.select(range(min(max_samples, len(test))))
+
             format_function = partial(self._format_sample_str, time_series_format_function) if format_sample_str else self._format_sample
-           
+
             from tqdm import tqdm
-            
+
             print("Formatting training samples...")
             self.__class__._train_dataset = list(tqdm(map(format_function, train), total=len(train), desc="Training samples"))
-            
+
             print("Formatting validation samples...")
             self.__class__._validation_dataset = list(tqdm(map(format_function, val), total=len(val), desc="Validation samples"))
-            
+
             print("Formatting test samples...")
             self.__class__._test_dataset = list(tqdm(map(format_function, test), total=len(test), desc="Test samples"))
 
