@@ -7,7 +7,6 @@
 #
 
 import torch
-import torch.nn as nn
 from typing import List, Dict, Tuple, Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from torch.nn.utils.rnn import pad_sequence
@@ -35,6 +34,7 @@ class OpenTSLMSP(TimeSeriesLLM):
         self,
         llm_id: str = "meta-llama/Llama-3.2-1B",
         device: str = "cuda",
+        use_flash_attention: bool = False
     ):
         super().__init__(device)
 
@@ -45,12 +45,12 @@ class OpenTSLMSP(TimeSeriesLLM):
         # Use left padding for decoder-only models during batched generation
         self.tokenizer.padding_side = 'left'
 
-        # 2) load LLM
+        # 2) load LLM (start with eager attention by default)
         self.llm = AutoModelForCausalLM.from_pretrained(
             llm_id,
             torch_dtype=torch.bfloat16,
             device_map={"": device},
-            attn_implementation="flash_attention_2",
+            attn_implementation="flash_attention_2" if use_flash_attention else "eager",
         )
         self.llm.resize_token_embeddings(len(self.tokenizer))
 
@@ -138,7 +138,7 @@ class OpenTSLMSP(TimeSeriesLLM):
                 p.numel() for p in self.llm.parameters() if p.requires_grad
             )
             total_params = sum(p.numel() for p in self.llm.parameters())
-            print(f"✅ LoRA enabled:")
+            print("✅ LoRA enabled:")
             print(f"   LoRA parameters: {lora_params:,}")
             print(f"   Total trainable parameters: {trainable_params:,}")
             print(f"   Total parameters: {total_params:,}")

@@ -10,7 +10,7 @@
 # Hyper‑parameters
 # ---------------------------
 
-BATCH_SIZE = 16
+BATCH_SIZE = 1
 EVAL_BATCH_SIZE = 32
  
 PATCH_SIZE = 4
@@ -21,7 +21,7 @@ LR_PROJECTOR = 1e-4
 WEIGHT_DECAY = 1e-2
 GRAD_CLIP_NORM = 1.0
 WARMUP_FRAC = 0.03
-MAX_SAMPLES = None  # set to an int for quick experiments
+MAX_SAMPLES = 5 # set to an int for quick experiments
 RESULTS_FILE = "test_predictions.jsonl"
 EMBED_DIM = 128
 ENCODER_OUTPUT_DIM = EMBED_DIM

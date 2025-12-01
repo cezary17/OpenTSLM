@@ -46,6 +46,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
         cross_attn_every_n_layers: int = 1,
         decoder_layers_attr_name: str = None,
         freeze_lm_embeddings: bool = False,
+        try_flash_attention: bool = False,
         **flamingo_kwargs,
     ):
         super().__init__(device)
@@ -66,7 +67,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
             cache_dir=None,
             device_map={"": device},
             dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation="flash_attention_2" if try_flash_attention else "eager",
         )
 
         # add Flamingo special tokens to the tokenizer
@@ -114,7 +115,7 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
                     return __KNOWN_DECODER_LAYERS_ATTR_NAMES[k]
 
             raise ValueError(
-                f"We require the attribute name for the nn.ModuleList in the decoder storing the transformer block layers. Please supply this string manually."
+                "We require the attribute name for the nn.ModuleList in the decoder storing the transformer block layers. Please supply this string manually."
             )
 
         decoder_layers_attr_name = _infer_decoder_layers_attr_name(lang_encoder)
@@ -344,13 +345,13 @@ class OpenTSLMFlamingo(TimeSeriesLLM):
         # Load state dict with strict=False to handle missing/unexpected keys
         missing_keys, unexpected_keys = self.load_state_dict(model_state, strict=False)
         if missing_keys:
-            print(f"⚠️  Warning: Missing keys when loading checkpoint:")
+            print("⚠️  Warning: Missing keys when loading checkpoint:")
             for key in missing_keys[:10]:
                 print(f"   - {key}")
             if len(missing_keys) > 10:
                 print(f"   ... and {len(missing_keys) - 10} more keys")
         if unexpected_keys:
-            print(f"⚠️  Warning: Unexpected keys when loading checkpoint:")
+            print("⚠️  Warning: Unexpected keys when loading checkpoint:")
             for key in unexpected_keys[:10]:
                 print(f"   - {key}")
             if len(unexpected_keys) > 10:

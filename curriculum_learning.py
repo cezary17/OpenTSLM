@@ -12,7 +12,6 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 import json
-import os as _os
 import argparse
 from typing import List, Optional, Dict, Any, Callable
 from time_series_datasets.TSQADataset import TSQADataset
@@ -30,24 +29,14 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import (
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
-    BackwardPrefetch,
-    FullStateDictConfig,
-    StateDictType,
-)
 from tqdm.auto import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from model.encoder.TransformerCNNEncoder import TransformerCNNEncoder
 from model.llm.OpenTSLMFlamingo import OpenTSLMFlamingo
 from model.llm.OpenTSLMSP import OpenTSLMSP
-from model.projector.MLPProjector import MLPProjector
 import datetime
 from logger import get_logger, set_global_verbose
+from mlflow_tracker import MLflowTracker
 
 from model_config import (
     BATCH_SIZE,
@@ -55,7 +44,6 @@ from model_config import (
     GRAD_CLIP_NORM,
     LR_ENCODER,
     LR_PROJECTOR,
-    NUM_EPOCHS,
     PATCH_SIZE,
     WARMUP_FRAC,
     WEIGHT_DECAY,
@@ -156,6 +144,16 @@ class CurriculumTrainer:
         self.model = self._initialize_model()
         self.results_dir = os.path.join("results", self.llm_id_safe, self.model_type)
         self._create_results_dir()
+
+        # Initialize MLflow tracker
+        experiment_name = f"OpenTSLM-{self.llm_id_safe}-{self.model_type}"
+        self.mlflow_tracker = MLflowTracker(
+            experiment_name=experiment_name,
+            tracking_uri=None,  # Will use env variable or default
+            rank=self.rank,
+            enabled=True
+        )
+        self.mlflow_tracker.mlflow.pytorch.autolog()
 
     def _get_device(self) -> str:
         """Get the best available device."""
@@ -696,7 +694,7 @@ class CurriculumTrainer:
                         if len(missing_keys) > 5:
                             print(f"   ... and {len(missing_keys) - 5} more keys")
                         print(
-                            f"   This is normal when transitioning between stages with different model configurations."
+                            "   This is normal when transitioning between stages with different model configurations."
                         )
                     if unexpected_keys and self.rank == 0:
                         print(
@@ -950,7 +948,7 @@ class CurriculumTrainer:
             if eval_only:
                 print("🔍 EVAL-ONLY MODE: Skipping training, only running evaluation")
             print("=" * 60)
-            print(f"📊 Stage Configuration:")
+            print("📊 Stage Configuration:")
             print(f"   Epochs: {num_epochs}")
             if self.model_type == "OpenTSLMSP":
                 print(f"   Encoder LR: {lr_encoder:.2e}")
@@ -1006,7 +1004,7 @@ class CurriculumTrainer:
             print(
                 f"✅ Evaluation already completed for {stage_name}, skipping training and evaluation"
             )
-            print(f"📂 Loading existing metrics...")
+            print("📂 Loading existing metrics...")
 
             # Load and return existing metrics
             metrics_file = os.path.join(
@@ -1026,6 +1024,32 @@ class CurriculumTrainer:
 
         # Enable LoRA if needed for this stage
         self._enable_lora_if_needed(stage_name)
+
+        # Start MLflow run for this stage
+        stage_params = {
+            "stage_name": stage_name,
+            "num_epochs": num_epochs,
+            "batch_size": batch_size or BATCH_SIZE,
+            "model_type": self.model_type,
+            "llm_id": self.llm_id,
+            "device": str(self.device),
+            "world_size": self.world_size,
+            "eval_only": eval_only,
+        }
+        if self.model_type == "OpenTSLMSP":
+            stage_params.update({
+                "lr_encoder": lr_encoder,
+                "lr_projector": lr_projector,
+            })
+        else:
+            stage_params["lr_base"] = lr_base
+
+        self.mlflow_tracker.start_stage_run(stage_name, stage_params)
+
+        # Log model summary
+        self.mlflow_tracker.log_model_summary(self._get_model())
+
+        self.mlflow_tracker.mlflow.log_metric("test_metric", 1234)
 
         # Initialize optimizer and scheduler
         optimizer = self._get_optimizer(batch_size, lr_encoder, lr_projector, lr_base)
@@ -1068,11 +1092,7 @@ class CurriculumTrainer:
             )
 
         # Use batched generation for faster evaluation
-        # Eval batch size is typically smaller than training due to generation memory overhead
         eval_batch_size = EVAL_BATCH_SIZE
-
-        if self.rank == 0:
-            print(f"Evaluation batch size: {eval_batch_size} (enables batched generation)")
 
         val_loader = self._merge_data_loaders(
             [dataset_class("validation", EOS_TOKEN=self._get_model().get_eos_token())],
@@ -1120,8 +1140,8 @@ class CurriculumTrainer:
         # Skip training loop if eval_only is True
         if eval_only:
             if self.rank == 0:
-                print(f"⏭️  Skipping training loop (eval_only mode)")
-                print(f"📂 Using existing checkpoint for evaluation")
+                print("⏭️  Skipping training loop (eval_only mode)")
+                print("📂 Using existing checkpoint for evaluation")
             epoch = best_epoch
             epochs_no_improve = 0
         else:
@@ -1177,9 +1197,18 @@ class CurriculumTrainer:
                             lr=f"{scheduler.get_last_lr()[0]:.2e}",
                         )
 
+                    # Log training loss and learning rate to MLflow per batch
+                    global_step = (epoch - 1) * len(train_loader) + i
+                    self.mlflow_tracker.log_metric("train_loss_batch", loss.item(), step=global_step)
+                    self.mlflow_tracker.log_metric("learning_rate_batch", scheduler.get_last_lr()[0], step=global_step)
+
                 avg_train_loss = running_loss / len(train_loader)
+
                 if self.rank == 0:
                     tqdm.write(f"Epoch {epoch} — train loss: {avg_train_loss:.4f}")
+
+                # Log average training loss to MLflow per epoch
+                self.mlflow_tracker.log_metric("train_loss_epoch", avg_train_loss, step=epoch)
 
                 # Validation
                 val_loss = 0.0
@@ -1203,6 +1232,13 @@ class CurriculumTrainer:
                 if self.rank == 0:
                     tqdm.write(f"Epoch {epoch} — val   loss: {avg_val_loss:.4f}")
                     tqdm.write(f"Epoch {epoch} — best  loss: {best_val_loss:.4f}")
+
+                # Log validation loss and learning rate to MLflow
+                self.mlflow_tracker.log_metrics({
+                    "val_loss": avg_val_loss,
+                    "best_val_loss": best_val_loss,
+                    "learning_rate": scheduler.get_last_lr()[0]
+                }, step=epoch)
 
                 # Save loss history for this epoch
                 self._save_loss_history(stage_name, epoch, avg_train_loss, avg_val_loss)
@@ -1275,6 +1311,18 @@ class CurriculumTrainer:
         metrics = self._evaluate_stage(
             stage_name, test_loader, stage_name, metric_func, best_epoch
         )
+
+        # Log final evaluation metrics to MLflow
+        if self.rank == 0:
+            for key, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    self.mlflow_tracker.log_metric(f"final_{key}", value)
+
+        # Log artifacts to MLflow
+        self.mlflow_tracker.log_stage_artifacts(stage_name, self.results_dir)
+
+        # End stage run
+        self.mlflow_tracker.end_stage_run(status="FINISHED")
 
         return metrics
 
@@ -1485,6 +1533,19 @@ class CurriculumTrainer:
                 print(f"🌐 Distributed training with {self.world_size} GPUs")
             print("=" * 80)
 
+        # Start parent MLflow run for the entire curriculum
+        curriculum_params = {
+            "model_type": self.model_type,
+            "llm_id": self.llm_id,
+            "device": str(self.device),
+            "world_size": self.world_size,
+            "stages": stages,
+            "incomplete_stages": incomplete_stages,
+            "eval_only": eval_only,
+        }
+        if batch_size:
+            curriculum_params["batch_size"] = batch_size
+
         results = {}
 
         # Run only incomplete stages
@@ -1551,7 +1612,7 @@ class CurriculumTrainer:
             with open(overall_results_file, "w") as f:
                 json.dump(results, f, indent=2)
 
-            print(f"\n🎉 Curriculum Learning Complete!")
+            print("\n🎉 Curriculum Learning Complete!")
             print(f"📁 All results saved to: {self.results_dir}/")
             print(f"📊 Overall results: {overall_results_file}")
 
