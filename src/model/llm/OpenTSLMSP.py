@@ -55,10 +55,10 @@ class OpenTSLMSP(TimeSeriesLLM):
         self.llm.resize_token_embeddings(len(self.tokenizer))
 
         # 3) encoder + projector (now internal)
-        self.encoder = TransformerCNNEncoder().to(device)
+        self.encoder = TransformerCNNEncoder().to(device=device, dtype=torch.bfloat16)
         self.projector = MLPProjector(
             ENCODER_OUTPUT_DIM, self.llm.config.hidden_size, device=device
-        ).to(device)
+        ).to(device=device, dtype=torch.bfloat16)
 
         self.patch_size = 4
 
@@ -365,6 +365,13 @@ class OpenTSLMSP(TimeSeriesLLM):
             labels=labels,
             return_dict=True,
         )
+
+        answer_logits = outputs.logits[:, L - 1:L - 1 + ans_ids.size(1), :]
+        predicted_ids = answer_logits.argmax(dim=-1)
+
+        # Decode model's current predictions
+        predicted_answers = self.tokenizer.batch_decode(predicted_ids, skip_special_tokens=True)
+
         return outputs.loss
 
     def get_eos_token(self) -> str:
